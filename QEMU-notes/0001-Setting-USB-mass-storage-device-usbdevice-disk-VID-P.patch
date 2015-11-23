@@ -1,0 +1,129 @@
+From 4821dafd0336c490829abf86463641a92e11d6b4 Mon Sep 17 00:00:00 2001
+From: Dhiru Kholia <kholia@kth.se>
+Date: Sun, 14 Feb 2016 10:16:10 +0100
+Subject: [PATCH] Setting USB mass storage device (-usbdevice disk) VID, PID
+ serial etc.
+
+https://lists.gnu.org/archive/html/qemu-discuss/2015-07/msg00072.html
+Hi,
+
+Recently I needed to sandbox some software, running it inside Qemu off
+of a disk image of the USB stick it came on. However, Qemu's USB mass
+storage device emulation (-usbdevice disk) shows up as a "QEMU USB
+HARDDRIVE" with VID:PID of 46f4:0001.
+
+The sandboxed software didn't like that at all, and refused to run. So I
+patched Qemu to take VID, PID, serial etc. from the command line
+arguments.
+
+For example: "-usbdevice
+disk:format=raw:vid=0a6b:pid=0001:manufacturer=Whoever:product=Whatever:serial=324324:hdd.img"
+
+I'm posting the patch here for other people to find, should they develop
+the same VID-faking needs.
+
+Yes, I've read http://wiki.qemu.org/Contribute/SubmitAPatch.
+
+I'm not posting the patch to -dev as it's a one-off single-purpose hack,
+not a proper solution. For instance, it crumbles if you add more
+than one '-usbdevice disk' device.
+---
+ hw/usb/dev-storage.c | 56 +++++++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 44 insertions(+), 12 deletions(-)
+
+diff --git a/hw/usb/dev-storage.c b/hw/usb/dev-storage.c
+index 5ae0424..a59476f 100644
+--- a/hw/usb/dev-storage.c
++++ b/hw/usb/dev-storage.c
+@@ -88,7 +88,7 @@ enum {
+     STR_CONFIG_SUPER,
+ };
+ 
+-static const USBDescStrings desc_strings = {
++static USBDescStrings desc_strings = {
+     [STR_MANUFACTURER] = "QEMU",
+     [STR_PRODUCT]      = "QEMU USB HARDDRIVE",
+     [STR_SERIALNUMBER] = "1",
+@@ -204,7 +204,7 @@ static const USBDescDevice desc_device_super = {
+     },
+ };
+ 
+-static const USBDesc desc = {
++static USBDesc desc = {
+     .id = {
+         .idVendor          = 0x46f4, /* CRC16() of "QEMU" */
+         .idProduct         = 0x0001,
+@@ -682,7 +682,6 @@ static USBDevice *usb_msd_init(USBBus *bus, const char *filename)
+     QemuOpts *opts;
+     DriveInfo *dinfo;
+     USBDevice *dev;
+-    const char *p1;
+     char fmt[32];
+ 
+     /* parse -usbdevice disk: syntax into drive opts */
+@@ -691,20 +690,53 @@ static USBDevice *usb_msd_init(USBBus *bus, const char *filename)
+         opts = qemu_opts_create(qemu_find_opts("drive"), id, 1, NULL);
+     } while (!opts);
+ 
+-    p1 = strchr(filename, ':');
+-    if (p1++) {
+-        const char *p2;
+-
+-        if (strstart(filename, "format=", &p2)) {
+-            int len = MIN(p1 - p2, sizeof(fmt));
+-            pstrcpy(fmt, len, p2);
++    int filename_len = strlen(filename)+1;
++    char c_filename[filename_len];
++    pstrcpy(c_filename, filename_len, filename);
++    char* comp;
++    char delim = ':';
++    char subdelim = '=';
++
++    comp = strtok(c_filename, &delim); //this actually modifies the parsee in place, hence the copy.
++    while(comp){
++        const char *p;
++        if (strstart(comp, "format=", &p)) {
++            int len = MIN(comp - p, sizeof(fmt));
++            pstrcpy(fmt, len, p);
+             qemu_opt_set(opts, "format", fmt, &error_abort);
+-        } else if (*filename != ':') {
++        }
++        else if (strstart(comp, "vid=", &p)) {
++            desc.id.idVendor = (uint16_t) strtol(p, NULL, 16);
++        }
++        else if (strstart(comp, "pid=", &p)) {
++            desc.id.idProduct = (uint16_t) strtol(p, NULL, 16);
++        }
++        else if (strstart(comp, "manufacturer=", &p)) {
++            char* manuf = malloc(strlen(p)+1);
++            pstrcpy(manuf, strlen(p)+1, p);
++            desc_strings[STR_MANUFACTURER] = manuf;
++        }
++        else if (strstart(comp, "product=", &p)) {
++            char* product = malloc(strlen(p)+1);
++            pstrcpy(product, strlen(p)+1, p);
++            desc_strings[STR_PRODUCT] = product;
++        }
++        else if (strstart(comp, "serial=", &p)) {
++            char* serial = malloc(strlen(p)+1);
++            pstrcpy(serial, strlen(p)+1, p);
++            desc_strings[STR_SERIALNUMBER] = serial;
++        }
++        else if (index(comp, (int) subdelim) != NULL) {
+             error_report("unrecognized USB mass-storage option %s", filename);
+             return NULL;
+         }
+-        filename = p1;
++        else {
++            filename = comp;
++        }
++        comp = strtok(NULL, &delim); //advance to next token
+     }
++
++
+     if (!*filename) {
+         error_report("block device specification needed");
+         return NULL;
+-- 
+2.7.1
+
