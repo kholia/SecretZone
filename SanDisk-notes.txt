@@ -1,0 +1,9 @@
+VID: 0781 PID: 74e5, SanDisk Sansa Clip Zip
+
+http://www.rockbox.org/wiki/DeviceDetection
+
+...
+
+$ qemu-img create -f qcow2 sansa.img 4G
+
+$ qemu-img info sansa.img

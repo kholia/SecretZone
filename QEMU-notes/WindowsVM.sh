@@ -16,11 +16,11 @@
 
 # exec qemu-system-x86_64 \
 exec ~/QEMU/bin/qemu-system-x86_64 \
-    -enable-kvm -localtime \
+    -enable-kvm -rtc base=localtime \
     -cpu host \
     -drive file=WindowsVM.img,if=virtio \
     -m 1600M -monitor stdio \
-    -device usb-ehci \
+    -device usb-ehci,id=ehci \
     -name Windows \
     -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device rtl8139,netdev=net0,id=net0,mac=52:54:00:c9:18:27 \
     -usbdevice 'disk:format=qcow2:vid=04E8:pid=61B6:manufacturer=Samsung:product=Samsung M3 Portable:serial=324324:hdd.img' \
